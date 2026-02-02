@@ -1,5 +1,4 @@
 # generated data
-data/
 data_generation/data/
 data_generation/*.csv
 *.csv
