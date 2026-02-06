@@ -8,3 +8,7 @@
 
 1. **Download** the data from [Google Drive](https://drive.google.com/file/d/1pjTVI4o3klDr0ahS7pJY5J9ooI2Lbg8h/view?usp=sharing).
 2. **Place** the files in the `data_generation` folder — `games.csv` and `players.csv` should both be in the `data_generation` folder.
+
+## Project Setup
+
+This project uses [uv](https://github.com/astral-sh/uv) to manage dependencies. Install `uv` on your computer, then run `uv sync` to install dependencies in the environment. `uv run mypythonfile.py` will run that python file in the uv environment with the project dependencies.
