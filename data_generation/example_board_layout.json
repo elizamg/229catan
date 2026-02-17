@@ -1,0 +1,454 @@
+[
+  {
+    "coordinate": [
+      0,
+      0,
+      0
+    ],
+    "tile": {
+      "id": 0,
+      "type": "RESOURCE_TILE",
+      "resource": "SHEEP",
+      "number": 6
+    }
+  },
+  {
+    "coordinate": [
+      1,
+      -1,
+      0
+    ],
+    "tile": {
+      "id": 1,
+      "type": "DESERT"
+    }
+  },
+  {
+    "coordinate": [
+      0,
+      -1,
+      1
+    ],
+    "tile": {
+      "id": 2,
+      "type": "RESOURCE_TILE",
+      "resource": "SHEEP",
+      "number": 8
+    }
+  },
+  {
+    "coordinate": [
+      -1,
+      0,
+      1
+    ],
+    "tile": {
+      "id": 3,
+      "type": "RESOURCE_TILE",
+      "resource": "BRICK",
+      "number": 4
+    }
+  },
+  {
+    "coordinate": [
+      -1,
+      1,
+      0
+    ],
+    "tile": {
+      "id": 4,
+      "type": "RESOURCE_TILE",
+      "resource": "BRICK",
+      "number": 4
+    }
+  },
+  {
+    "coordinate": [
+      0,
+      1,
+      -1
+    ],
+    "tile": {
+      "id": 5,
+      "type": "RESOURCE_TILE",
+      "resource": "WOOD",
+      "number": 5
+    }
+  },
+  {
+    "coordinate": [
+      1,
+      0,
+      -1
+    ],
+    "tile": {
+      "id": 6,
+      "type": "RESOURCE_TILE",
+      "resource": "WOOD",
+      "number": 11
+    }
+  },
+  {
+    "coordinate": [
+      2,
+      -2,
+      0
+    ],
+    "tile": {
+      "id": 7,
+      "type": "RESOURCE_TILE",
+      "resource": "ORE",
+      "number": 2
+    }
+  },
+  {
+    "coordinate": [
+      1,
+      -2,
+      1
+    ],
+    "tile": {
+      "id": 8,
+      "type": "RESOURCE_TILE",
+      "resource": "SHEEP",
+      "number": 3
+    }
+  },
+  {
+    "coordinate": [
+      0,
+      -2,
+      2
+    ],
+    "tile": {
+      "id": 9,
+      "type": "RESOURCE_TILE",
+      "resource": "BRICK",
+      "number": 10
+    }
+  },
+  {
+    "coordinate": [
+      -1,
+      -1,
+      2
+    ],
+    "tile": {
+      "id": 10,
+      "type": "RESOURCE_TILE",
+      "resource": "WHEAT",
+      "number": 6
+    }
+  },
+  {
+    "coordinate": [
+      -2,
+      0,
+      2
+    ],
+    "tile": {
+      "id": 11,
+      "type": "RESOURCE_TILE",
+      "resource": "WHEAT",
+      "number": 9
+    }
+  },
+  {
+    "coordinate": [
+      -2,
+      1,
+      1
+    ],
+    "tile": {
+      "id": 12,
+      "type": "RESOURCE_TILE",
+      "resource": "WOOD",
+      "number": 10
+    }
+  },
+  {
+    "coordinate": [
+      -2,
+      2,
+      0
+    ],
+    "tile": {
+      "id": 13,
+      "type": "RESOURCE_TILE",
+      "resource": "WOOD",
+      "number": 5
+    }
+  },
+  {
+    "coordinate": [
+      -1,
+      2,
+      -1
+    ],
+    "tile": {
+      "id": 14,
+      "type": "RESOURCE_TILE",
+      "resource": "ORE",
+      "number": 8
+    }
+  },
+  {
+    "coordinate": [
+      0,
+      2,
+      -2
+    ],
+    "tile": {
+      "id": 15,
+      "type": "RESOURCE_TILE",
+      "resource": "SHEEP",
+      "number": 11
+    }
+  },
+  {
+    "coordinate": [
+      1,
+      1,
+      -2
+    ],
+    "tile": {
+      "id": 16,
+      "type": "RESOURCE_TILE",
+      "resource": "ORE",
+      "number": 12
+    }
+  },
+  {
+    "coordinate": [
+      2,
+      0,
+      -2
+    ],
+    "tile": {
+      "id": 17,
+      "type": "RESOURCE_TILE",
+      "resource": "WHEAT",
+      "number": 9
+    }
+  },
+  {
+    "coordinate": [
+      2,
+      -1,
+      -1
+    ],
+    "tile": {
+      "id": 18,
+      "type": "RESOURCE_TILE",
+      "resource": "WHEAT",
+      "number": 3
+    }
+  },
+  {
+    "coordinate": [
+      3,
+      -3,
+      0
+    ],
+    "tile": {
+      "id": 0,
+      "type": "PORT",
+      "direction": "WEST",
+      "resource": "SHEEP"
+    }
+  },
+  {
+    "coordinate": [
+      2,
+      -3,
+      1
+    ],
+    "tile": {
+      "type": "WATER"
+    }
+  },
+  {
+    "coordinate": [
+      1,
+      -3,
+      2
+    ],
+    "tile": {
+      "id": 1,
+      "type": "PORT",
+      "direction": "NORTHWEST",
+      "resource": "BRICK"
+    }
+  },
+  {
+    "coordinate": [
+      0,
+      -3,
+      3
+    ],
+    "tile": {
+      "type": "WATER"
+    }
+  },
+  {
+    "coordinate": [
+      -1,
+      -2,
+      3
+    ],
+    "tile": {
+      "id": 2,
+      "type": "PORT",
+      "direction": "NORTHWEST",
+      "resource": null
+    }
+  },
+  {
+    "coordinate": [
+      -2,
+      -1,
+      3
+    ],
+    "tile": {
+      "type": "WATER"
+    }
+  },
+  {
+    "coordinate": [
+      -3,
+      0,
+      3
+    ],
+    "tile": {
+      "id": 3,
+      "type": "PORT",
+      "direction": "NORTHEAST",
+      "resource": "WOOD"
+    }
+  },
+  {
+    "coordinate": [
+      -3,
+      1,
+      2
+    ],
+    "tile": {
+      "type": "WATER"
+    }
+  },
+  {
+    "coordinate": [
+      -3,
+      2,
+      1
+    ],
+    "tile": {
+      "id": 4,
+      "type": "PORT",
+      "direction": "EAST",
+      "resource": null
+    }
+  },
+  {
+    "coordinate": [
+      -3,
+      3,
+      0
+    ],
+    "tile": {
+      "type": "WATER"
+    }
+  },
+  {
+    "coordinate": [
+      -2,
+      3,
+      -1
+    ],
+    "tile": {
+      "id": 5,
+      "type": "PORT",
+      "direction": "EAST",
+      "resource": null
+    }
+  },
+  {
+    "coordinate": [
+      -1,
+      3,
+      -2
+    ],
+    "tile": {
+      "type": "WATER"
+    }
+  },
+  {
+    "coordinate": [
+      0,
+      3,
+      -3
+    ],
+    "tile": {
+      "id": 6,
+      "type": "PORT",
+      "direction": "SOUTHEAST",
+      "resource": null
+    }
+  },
+  {
+    "coordinate": [
+      1,
+      2,
+      -3
+    ],
+    "tile": {
+      "type": "WATER"
+    }
+  },
+  {
+    "coordinate": [
+      2,
+      1,
+      -3
+    ],
+    "tile": {
+      "id": 7,
+      "type": "PORT",
+      "direction": "SOUTHWEST",
+      "resource": "WHEAT"
+    }
+  },
+  {
+    "coordinate": [
+      3,
+      0,
+      -3
+    ],
+    "tile": {
+      "type": "WATER"
+    }
+  },
+  {
+    "coordinate": [
+      3,
+      -1,
+      -2
+    ],
+    "tile": {
+      "id": 8,
+      "type": "PORT",
+      "direction": "SOUTHWEST",
+      "resource": "ORE"
+    }
+  },
+  {
+    "coordinate": [
+      3,
+      -2,
+      -1
+    ],
+    "tile": {
+      "type": "WATER"
+    }
+  }
+]

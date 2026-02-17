@@ -9,3 +9,6 @@ data_generation/*.csv
 __pycache__
 .venv/
 .python-version
+
+
+ridge_model.pkl
