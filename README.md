@@ -12,3 +12,8 @@
 ## Project Setup
 
 This project uses [uv](https://github.com/astral-sh/uv) to manage dependencies. Install `uv` on your computer, then run `uv sync` to install dependencies in the environment. `uv run mypythonfile.py` will run that python file in the uv environment with the project dependencies.
+
+## Training/running linear + L2 model
+
+`uv run train.py` to train the model and save it
+`uv run train.py --load /path/to/model.pkl` will run a saved model
