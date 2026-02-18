@@ -7,7 +7,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from scipy.stats import spearmanr
 
-from features.generate_features import build_dataset
+from features.generate_features import build_dataset, build_winner_dataset
 from board_constants import RESOURCES
 from config import RIDGE_ALPHA, RANDOM_SEED, TEST_SPLIT, PROJECT_ROOT
 
@@ -83,6 +83,40 @@ def evaluate(model, X, y, game_ids):
         "Spearman (mean)": np.mean(spearman_scores) if spearman_scores else 0.0,
         "Precision@1": precision_at_1_hits / len(unique_games),
     }
+
+
+def evaluate_winner_prediction(model, scaler, split_game_ids):
+    """
+    Predict which player wins each game based on initial placements.
+
+    Predicts final VP for the player's second placement with all other
+    opponent settlements visible. For each game, check if the player 
+    with the highest predicted VP matches the actual winner.
+
+    Returns accuracy as a float.
+    """
+    X_w, y_w, gid_w = build_winner_dataset()
+
+    # Filter to only games in the given split
+    split_set = set(split_game_ids)
+    mask = np.array([g in split_set for g in gid_w])
+    X_w, y_w, gid_w = X_w[mask], y_w[mask], gid_w[mask]
+
+    X_w_scaled = scaler.transform(X_w)
+    y_hat = model.predict(X_w_scaled)
+
+    correct = 0
+    unique_games = np.unique(gid_w)
+    for gid in unique_games:
+        gmask = gid_w == gid
+        actual = y_w[gmask]
+        predicted = y_hat[gmask]
+        # Set-based: correct if predicted winner is among actual winners (tie handling)
+        actual_winners = set(np.where(actual == actual.max())[0])
+        if np.argmax(predicted) in actual_winners:
+            correct += 1
+
+    return correct / len(unique_games) if len(unique_games) > 0 else 0.0
 
 
 DEFAULT_MODEL_PATH = os.path.join(PROJECT_ROOT, "ridge_model.pkl")
@@ -181,6 +215,12 @@ def main():
     print("\nTest:")
     for k, v in test_metrics.items():
         print(f"{k}: {v:.4f}")
+
+    print("\nWinner prediction (full board context):")
+    train_winner_acc = evaluate_winner_prediction(model, scaler, gid_train)
+    test_winner_acc = evaluate_winner_prediction(model, scaler, gid_test)
+    print(f"Train: {train_winner_acc:.4f}")
+    print(f"Test:  {test_winner_acc:.4f}")
 
     coefs = model.coef_
     top_idx = np.argsort(np.abs(coefs))[::-1][:10]
