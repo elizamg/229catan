@@ -417,3 +417,73 @@ def build_dataset() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     game_ids = np.array(all_game_ids)
 
     return X, y, game_ids
+
+
+def build_winner_dataset() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    To predict the winner of the game, we evaluate the position of the player's
+    second settlement/road with all of the other players placements.
+
+    Returns:
+        X: (n_games * 4, n_features) feature matrix
+        y: (n_games * 4,) VP labels
+        game_ids: (n_games * 4,) game ID strings
+    """
+    game_boards = {}
+    with open(GAMES_CSV, newline="") as f:
+        for row in csv.DictReader(f):
+            game_boards[row["game_id"]] = row["board_layout"]
+
+    game_players: dict[str, list[dict]] = {}
+    with open(PLAYERS_CSV, newline="") as f:
+        for row in csv.DictReader(f):
+            gid = row["game_id"]
+            game_players.setdefault(gid, []).append(
+                {
+                    "player": row["player"],
+                    "placements_json": row["initial_placements"],
+                    "vps": int(row["vps"]),
+                }
+            )
+
+    all_features = []
+    all_vps = []
+    all_game_ids = []
+
+    for gid, players in game_players.items():
+        tile_info, port_map = parse_board(game_boards[gid])
+        parsed = [parse_placements(p["placements_json"]) for p in players]
+        n = len(players)
+
+        all_settlements = []
+        for pi in range(n):
+            all_settlements.append(parsed[pi][0]["settlement_node"]) # round 0
+            all_settlements.append(parsed[pi][1]["settlement_node"]) # round 1
+
+        for pi in range(n):
+            settlement = parsed[pi][1]["settlement_node"]
+            road = parsed[pi][1]["road_edge"]
+
+            # all 7 other opponent settlements (excluds this player's round 1)
+            opponent_settlements = [
+                s for idx, s in enumerate(all_settlements) if idx != pi * 2 + 1
+            ]
+
+            feat = build_feature_vector(
+                settlement,
+                road,
+                tile_info,
+                port_map,
+                opponent_settlements,
+                pi,
+                1,  # placement_round=1
+            )
+            all_features.append(feat)
+            all_vps.append(players[pi]["vps"])
+            all_game_ids.append(gid)
+
+    X = np.array(all_features)
+    y = np.array(all_vps, dtype=float)
+    game_ids = np.array(all_game_ids)
+
+    return X, y, game_ids
