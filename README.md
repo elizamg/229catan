@@ -13,7 +13,76 @@
 
 This project uses [uv](https://github.com/astral-sh/uv) to manage dependencies. Install `uv` on your computer, then run `uv sync` to install dependencies in the environment. `uv run mypythonfile.py` will run that python file in the uv environment with the project dependencies.
 
-## Training/running linear + L2 model
+# Models
 
-`uv run train.py` to train the model and save it
-`uv run train.py --load /path/to/model.pkl` will run a saved model
+This project supports two models:
+
+- `ridge` — linear regression with L2 regularization  
+- `xgb` — XGBoost regressor  
+
+The training pipeline is shared; select the model using the `--model` flag.
+
+---
+
+# Training
+
+## Train Ridge (default)
+
+```
+uv run train.py
+```
+
+or explicitly:
+
+```
+uv run train.py --model ridge
+```
+
+---
+
+## Train XGBoost
+
+```
+uv run train.py --model xgb
+```
+
+---
+
+## Train XGBoost (Ranking)
+
+Trains a learning-to-rank model that groups samples by `game_id` (each board is a query group):
+
+```
+uv run train.py --model xgb --rank
+```
+
+---
+
+# macOS Users (XGBoost Only)
+
+If you see this error:
+
+```
+XGBoost Library (libxgboost.dylib) could not be loaded
+Library not loaded: @rpath/libomp.dylib
+```
+
+Install OpenMP:
+
+```
+brew install libomp
+```
+
+Then restart your terminal and re-run the command.
+
+macOS does not ship OpenMP by default, so this step is required for XGBoost.
+
+---
+
+# Running a Saved Model
+
+```
+uv run train.py --load path/to/model.pkl
+```
+
+This skips training and evaluates the saved model.

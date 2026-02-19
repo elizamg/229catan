@@ -11,6 +11,8 @@ from features.generate_features import build_dataset, build_winner_dataset
 from board_constants import RESOURCES
 from config import RIDGE_ALPHA, RANDOM_SEED, TEST_SPLIT, PROJECT_ROOT
 
+# NEW: optional XGBoost support lives in a separate module
+
 
 def split_by_game(X, y, game_ids, test_frac=TEST_SPLIT, seed=RANDOM_SEED):
     """
@@ -119,12 +121,14 @@ def evaluate_winner_prediction(model, scaler, split_game_ids):
     return correct / len(unique_games) if len(unique_games) > 0 else 0.0
 
 
-DEFAULT_MODEL_PATH = os.path.join(PROJECT_ROOT, "ridge_model.pkl")
+DEFAULT_RIDGE_MODEL_PATH = os.path.join(PROJECT_ROOT, "ridge_model.pkl")
+DEFAULT_XGB_MODEL_PATH = os.path.join(PROJECT_ROOT, "xgb_model.pkl")
+DEFAULT_XGB_RANKER_PATH = os.path.join(PROJECT_ROOT, "xgb_ranker.pkl")
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Train / evaluate linear model with ridge regression"
+        description="Train / evaluate placement->VP models"
     )
     parser.add_argument(
         "--load",
@@ -137,15 +141,36 @@ def parse_args():
         "-o",
         "--output",
         type=str,
-        default=DEFAULT_MODEL_PATH,
+        default=None,
         metavar="PATH",
-        help=f"trained model save path (default: {DEFAULT_MODEL_PATH})",
+        help=(
+            "trained model save path (default: auto based on --model/--rank; "
+            f"ridge={DEFAULT_RIDGE_MODEL_PATH}, xgb={DEFAULT_XGB_MODEL_PATH}, xgb-rank={DEFAULT_XGB_RANKER_PATH})"
+        ),
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="ridge",
+        choices=["ridge", "xgb"],
+        help="which model to train/evaluate (default: ridge)",
+    )
+    parser.add_argument(
+        "--rank",
+        action="store_true",
+        help="use XGBoost ranking objective (only applies to --model xgb)",
     )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+
+    if args.output is None:
+        if args.model == "ridge":
+            args.output = DEFAULT_RIDGE_MODEL_PATH
+        else:
+            args.output = DEFAULT_XGB_RANKER_PATH if args.rank else DEFAULT_XGB_MODEL_PATH
 
     res_lower = [r.lower() for r in RESOURCES]
     feature_names = (
@@ -187,27 +212,64 @@ def main():
     )
     print(f"Train: {X_train.shape[0]}  Test: {X_test.shape[0]}")
 
+    # Model selection
     if args.load:
         print(f"\nLoading model from {args.load}")
         saved = joblib.load(args.load)
         model = saved["model"]
-        scaler = saved["scaler"]
-        X_train_scaled = scaler.transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
+        scaler = saved.get("scaler")
+
+        if scaler is None:
+            from models.xgboost_model import IdentityTransformer
+
+            scaler = IdentityTransformer()
+
+        X_train_used = scaler.transform(X_train)
+        X_test_used = scaler.transform(X_test)
+
     else:
-        scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
+        if args.model == "ridge":
+            scaler = StandardScaler()
+            X_train_used = scaler.fit_transform(X_train)
+            X_test_used = scaler.transform(X_test)
 
-        model = Ridge(alpha=RIDGE_ALPHA)
-        model.fit(X_train_scaled, y_train)
+            model = Ridge(alpha=RIDGE_ALPHA)
+            model.fit(X_train_used, y_train)
 
-        joblib.dump({"model": model, "scaler": scaler}, args.output)
+            joblib.dump({"model": model, "scaler": scaler, "model_type": "ridge"}, args.output)
+
+        else:  # xgb
+            if args.rank:
+                from models.xgboost_ranker import (
+                    XGBRankConfig,
+                    train_ranker,
+                    save as save_ranker,
+                )
+
+                cfg = XGBRankConfig(random_state=RANDOM_SEED)
+                model, scaler = train_ranker(X_train, y_train, gid_train, cfg)
+
+                X_train_used = X_train
+                X_test_used = X_test
+
+                save_ranker(args.output, model=model, scaler=scaler, cfg=cfg)
+            else:
+                from models.xgboost_model import XGBConfig, train as train_xgb, save as save_xgb
+
+                cfg = XGBConfig(random_state=RANDOM_SEED)
+                model, scaler = train_xgb(X_train, y_train, cfg)
+
+                X_train_used = X_train
+                X_test_used = X_test
+
+                save_xgb(args.output, model=model, scaler=scaler, cfg=cfg)
+
         print("\nTraining completed")
         print(f"Model saved to {args.output}")
 
-    train_metrics = evaluate(model, X_train_scaled, y_train, gid_train)
-    test_metrics = evaluate(model, X_test_scaled, y_test, gid_test)
+    # Evaluation
+    train_metrics = evaluate(model, X_train_used, y_train, gid_train)
+    test_metrics = evaluate(model, X_test_used, y_test, gid_test)
 
     print("\nTrain:")
     for k, v in train_metrics.items():
@@ -222,11 +284,29 @@ def main():
     print(f"Train: {train_winner_acc:.4f}")
     print(f"Test:  {test_winner_acc:.4f}")
 
-    coefs = model.coef_
-    top_idx = np.argsort(np.abs(coefs))[::-1][:10]
-    print("\nTop 10 features by |coefficient|")
-    for rank, i in enumerate(top_idx, 1):
-        print(f"  {rank:2d}. {feature_names[i]:30s}  {coefs[i]:+.4f}")
+    # Interpretability
+    if hasattr(model, "coef_"):
+        coefs = model.coef_
+        top_idx = np.argsort(np.abs(coefs))[::-1][:10]
+        print("\nTop 10 features by |coefficient|")
+        for rank, i in enumerate(top_idx, 1):
+            print(f"  {rank:2d}. {feature_names[i]:30s}  {coefs[i]:+.4f}")
+    else:
+        # XGBoost path
+        try:
+            from models.xgboost_model import top_feature_importances
+
+            top_idx = top_feature_importances(model, k=10)
+            importances = getattr(model, "feature_importances_", None)
+            if importances is None or len(top_idx) == 0:
+                return
+
+            print("\nTop 10 features by importance")
+            for rank, i in enumerate(top_idx, 1):
+                print(f"  {rank:2d}. {feature_names[i]:30s}  {importances[i]:.6f}")
+        except Exception:
+            # If xgboost isn't installed or importances unavailable, skip.
+            return
 
 
 if __name__ == "__main__":

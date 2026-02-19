@@ -12,3 +12,5 @@ __pycache__
 
 
 ridge_model.pkl
+xgb_model.pkl
+xgb_ranker.pkl
