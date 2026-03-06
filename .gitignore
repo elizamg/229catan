@@ -5,3 +5,10 @@ data_generation/*.csv
 *.jsonl
 *.parquet
 .DS_Store
+
+__pycache__
+.venv/
+.python-version
+
+
+ridge_model.pkl
