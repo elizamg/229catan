@@ -2,16 +2,12 @@ import argparse
 import os
 import joblib
 import numpy as np
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_squared_error, mean_absolute_error
-from scipy.stats import spearmanr
 
-from features.generate_features import build_dataset, build_winner_dataset
+from features.generate_features import build_winner_classification_dataset
 from board_constants import RESOURCES
-from config import RIDGE_ALPHA, RANDOM_SEED, TEST_SPLIT, PROJECT_ROOT
-
-# NEW: optional XGBoost support lives in a separate module
+from config import RANDOM_SEED, TEST_SPLIT, PROJECT_ROOT
 
 
 def split_by_game(X, y, game_ids, test_frac=TEST_SPLIT, seed=RANDOM_SEED):
@@ -41,94 +37,64 @@ def split_by_game(X, y, game_ids, test_frac=TEST_SPLIT, seed=RANDOM_SEED):
     )
 
 
-def evaluate(model, X, y, game_ids):
-    """
-    Returns the following:
-    - MSE, RMSE, MAE (overall prediction quality)
-    - Spearman rank correlation per board:
-      For each game, rank the 8 placements by predicted VP and by actual VP.
-      Compute Spearman correlation. Report mean across games.
-      This measures how well the model ranks placements within a board,
-      which is what matters for the actual use case.
-    - Precision@1: fraction of games where the model's top-ranked
-      placement is also the actual highest-VP placement.
-    """
-    y_hat = model.predict(X)
+def evaluate_winner_accuracy_from_probs(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    game_ids: np.ndarray,
+) -> float:
+    """Winner accuracy when each game has multiple rows (one per player).
 
-    mse = mean_squared_error(y, y_hat)
-    rmse = np.sqrt(mse)
-    mae = mean_absolute_error(y, y_hat)
-
-    spearman_scores = []
-    precision_at_1_hits = 0
+    Despite the name, `y_prob` can be any per-player score (probability, logit, heuristic score).
+    Picks argmax score per game and checks if that player is among the true winners.
+    Tie-aware on ground truth: if multiple winners exist (same max VP), any is correct.
+    """
     unique_games = np.unique(game_ids)
-
+    correct = 0
     for gid in unique_games:
         mask = game_ids == gid
-        y_game = y[mask]
-        y_hat_game = y_hat[mask]
-
-        if len(y_game) < 2:
+        y_g = y_true[mask]
+        p_g = y_prob[mask]
+        if y_g.size == 0:
             continue
-
-        corr, _ = spearmanr(y_game, y_hat_game)
-        if not np.isnan(corr):
-            spearman_scores.append(corr)
-
-        if np.argmax(y_hat_game) == np.argmax(y_game):
-            precision_at_1_hits += 1
-
-    return {
-        "MSE": mse,
-        "RMSE": rmse,
-        "MAE": mae,
-        "Spearman (mean)": np.mean(spearman_scores) if spearman_scores else 0.0,
-        "Precision@1": precision_at_1_hits / len(unique_games),
-    }
-
-
-def evaluate_winner_prediction(model, scaler, split_game_ids):
-    """
-    Predict which player wins each game based on initial placements.
-
-    Predicts final VP for the player's second placement with all other
-    opponent settlements visible. For each game, check if the player 
-    with the highest predicted VP matches the actual winner.
-
-    Returns accuracy as a float.
-    """
-    X_w, y_w, gid_w = build_winner_dataset()
-
-    # Filter to only games in the given split
-    split_set = set(split_game_ids)
-    mask = np.array([g in split_set for g in gid_w])
-    X_w, y_w, gid_w = X_w[mask], y_w[mask], gid_w[mask]
-
-    X_w_scaled = scaler.transform(X_w)
-    y_hat = model.predict(X_w_scaled)
-
-    correct = 0
-    unique_games = np.unique(gid_w)
-    for gid in unique_games:
-        gmask = gid_w == gid
-        actual = y_w[gmask]
-        predicted = y_hat[gmask]
-        # Set-based: correct if predicted winner is among actual winners (tie handling)
-        actual_winners = set(np.where(actual == actual.max())[0])
-        if np.argmax(predicted) in actual_winners:
+        actual_winners = set(np.where(y_g == y_g.max())[0])
+        if int(np.argmax(p_g)) in actual_winners:
             correct += 1
-
     return correct / len(unique_games) if len(unique_games) > 0 else 0.0
 
 
-DEFAULT_RIDGE_MODEL_PATH = os.path.join(PROJECT_ROOT, "ridge_model.pkl")
-DEFAULT_XGB_MODEL_PATH = os.path.join(PROJECT_ROOT, "xgb_model.pkl")
-DEFAULT_XGB_RANKER_PATH = os.path.join(PROJECT_ROOT, "xgb_ranker.pkl")
+def sampled_random_winner_accuracy(y_true: np.ndarray, game_ids: np.ndarray, seed: int) -> float:
+    """Tie-aware random-guess accuracy by sampling one random player per game."""
+    unique_games = np.unique(game_ids)
+    if len(unique_games) == 0:
+        return 0.0
+    rng = np.random.RandomState(seed)
+    correct = 0
+    for gid in unique_games:
+        mask = game_ids == gid
+        y_g = y_true[mask]
+        if y_g.size == 0:
+            continue
+        pick = int(rng.randint(0, y_g.size))
+        actual_winners = set(np.where(y_g == y_g.max())[0])
+        if pick in actual_winners:
+            correct += 1
+    return correct / float(len(unique_games))
+
+
+DEFAULT_WINNER_LOGREG_PATH = os.path.join(PROJECT_ROOT, "winner_logreg.pkl")
+DEFAULT_WINNER_XGB_PATH = os.path.join(PROJECT_ROOT, "winner_xgb.pkl")
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Train / evaluate placement->VP models"
+        description="Train / evaluate models for Catan opening strength"
+    )
+    parser.add_argument(
+        "--task",
+        type=str,
+        default="winner",
+        choices=["winner"],
+        help="task to optimize (winner classification; optimized for WinnerAcc)",
     )
     parser.add_argument(
         "--load",
@@ -138,79 +104,70 @@ def parse_args():
         help="load a saved model instead of training",
     )
     parser.add_argument(
-        "-o",
-        "--output",
-        type=str,
-        default=None,
-        metavar="PATH",
-        help=(
-            "trained model save path (default: auto based on --model/--rank; "
-            f"ridge={DEFAULT_RIDGE_MODEL_PATH}, xgb={DEFAULT_XGB_MODEL_PATH}, xgb-rank={DEFAULT_XGB_RANKER_PATH})"
-        ),
-    )
-    parser.add_argument(
         "--model",
         type=str,
         default="ridge",
         choices=["ridge", "xgb"],
         help="which model to train/evaluate (default: ridge)",
     )
-    parser.add_argument(
-        "--rank",
-        action="store_true",
-        help="use XGBoost ranking objective (only applies to --model xgb)",
-    )
     return parser.parse_args()
+
+
+def _winner_feature_names(res_lower: list[str]) -> list[str]:
+    """Feature names for build_winner_classification_dataset(): 237 features."""
+    placement = (
+        ["total_prod"]
+        + [f"{r}_prod" for r in res_lower]
+        + ["resource_diversity", "num_6_or_8", "has_port"]
+        + [f"port_{r}" for r in res_lower]
+        + ["port_any", "port_prod_match", "expansion"]
+        + [f"share_{r}" for r in res_lower]
+    )
+    opponent = ["shared_tile_opps"] + [f"comp_{r}" for r in res_lower] + ["blocked_neighbors"]
+    turn = [f"player_pos_{i}" for i in range(4)] + ["placement_round", "placement_order"]
+
+    def pref(prefix: str, names: list[str]) -> list[str]:
+        return [f"{prefix}{n}" for n in names]
+
+    board = (
+        [f"board_{r}_prod" for r in res_lower]
+        + [f"board_{r}_high" for r in res_lower]
+        + [f"scarcity_{r}" for r in res_lower]
+    )
+    raw = [
+        f"tile{t}_{attr}"
+        for t in range(19)
+        for attr in [*res_lower, "desert", "prob", "number"]
+    ]
+
+    return (
+        pref("r0_", placement + opponent + turn)
+        + pref("r1_", placement + opponent + turn)
+        + board
+        + raw
+    )
 
 
 def main():
     args = parse_args()
 
-    if args.output is None:
-        if args.model == "ridge":
-            args.output = DEFAULT_RIDGE_MODEL_PATH
-        else:
-            args.output = DEFAULT_XGB_RANKER_PATH if args.rank else DEFAULT_XGB_MODEL_PATH
+    output_path = DEFAULT_WINNER_LOGREG_PATH if args.model == "ridge" else DEFAULT_WINNER_XGB_PATH
 
     res_lower = [r.lower() for r in RESOURCES]
-    feature_names = (
-        # Placement features (21)
-        [f"{r}_count" for r in res_lower]
-        + ["total_prod"]
-        + [f"{r}_prod" for r in res_lower]
-        + ["resource_diversity", "number_diversity", "has_port"]
-        + [f"port_{r}" for r in res_lower]
-        + ["port_any"]
-        + ["expansion"]
-        # Opponent features (7)
-        + ["shared_tile_opps"]
-        + [f"comp_{r}" for r in res_lower]
-        + ["blocked_neighbors"]
-        # Board aggregate features (11)
-        + [f"board_{r}_prod" for r in res_lower]
-        + [f"board_{r}_high" for r in res_lower]
-        + ["desert_ring"]
-        # Raw board features (19 tiles x 8)
-        + [
-            f"tile{t}_{attr}"
-            for t in range(19)
-            for attr in [*res_lower, "desert", "prob", "number"]
-        ]
-        # Turn order features (6)
-        + [f"player_pos_{i}" for i in range(4)]
-        + ["placement_round", "placement_order"]
-    )
+    feature_names = _winner_feature_names(res_lower)
 
     print("Loading dataset...")
-    X, y, game_ids = build_dataset()
+    X, y, game_ids = build_winner_classification_dataset()
     print(f"Loaded {len(np.unique(game_ids))} games")
 
+    # Single deterministic split.
+    seed = RANDOM_SEED
     X_train, X_test, y_train, y_test, gid_train, gid_test = split_by_game(
         X,
         y,
         game_ids,
+        seed=seed,
     )
-    print(f"Train: {X_train.shape[0]}  Test: {X_test.shape[0]}")
 
     # Model selection
     if args.load:
@@ -226,87 +183,100 @@ def main():
 
         X_train_used = scaler.transform(X_train)
         X_test_used = scaler.transform(X_test)
-
     else:
-        if args.model == "ridge":
-            scaler = StandardScaler()
-            X_train_used = scaler.fit_transform(X_train)
-            X_test_used = scaler.transform(X_test)
+        scaler = StandardScaler()
+        X_train_used = scaler.fit_transform(X_train)
+        X_test_used = scaler.transform(X_test)
 
-            model = Ridge(alpha=RIDGE_ALPHA)
+        if args.model == "ridge":
+            model = LogisticRegression(
+                C=1.0,
+                solver="lbfgs",
+                max_iter=2000,
+            )
+            model.fit(X_train_used, y_train)
+        else:
+            try:
+                from xgboost import XGBClassifier
+            except Exception as e:
+                raise RuntimeError("xgboost is required for --model xgb") from e
+
+            model = XGBClassifier(
+                n_estimators=600,
+                learning_rate=0.05,
+                max_depth=4,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                reg_lambda=1.0,
+                reg_alpha=0.0,
+                min_child_weight=1.0,
+                gamma=0.0,
+                objective="binary:logistic",
+                random_state=seed,
+                n_jobs=-1,
+                eval_metric="logloss",
+            )
             model.fit(X_train_used, y_train)
 
-            joblib.dump({"model": model, "scaler": scaler, "model_type": "ridge"}, args.output)
-
-        else:  # xgb
-            if args.rank:
-                from models.xgboost_ranker import (
-                    XGBRankConfig,
-                    train_ranker,
-                    save as save_ranker,
-                )
-
-                cfg = XGBRankConfig(random_state=RANDOM_SEED)
-                model, scaler = train_ranker(X_train, y_train, gid_train, cfg)
-
-                X_train_used = X_train
-                X_test_used = X_test
-
-                save_ranker(args.output, model=model, scaler=scaler, cfg=cfg)
-            else:
-                from models.xgboost_model import XGBConfig, train as train_xgb, save as save_xgb
-
-                cfg = XGBConfig(random_state=RANDOM_SEED)
-                model, scaler = train_xgb(X_train, y_train, cfg)
-
-                X_train_used = X_train
-                X_test_used = X_test
-
-                save_xgb(args.output, model=model, scaler=scaler, cfg=cfg)
-
-        print("\nTraining completed")
-        print(f"Model saved to {args.output}")
-
-    # Evaluation
-    train_metrics = evaluate(model, X_train_used, y_train, gid_train)
-    test_metrics = evaluate(model, X_test_used, y_test, gid_test)
-
-    print("\nTrain:")
-    for k, v in train_metrics.items():
-        print(f"{k}: {v:.4f}")
-    print("\nTest:")
-    for k, v in test_metrics.items():
-        print(f"{k}: {v:.4f}")
-
-    print("\nWinner prediction (full board context):")
-    train_winner_acc = evaluate_winner_prediction(model, scaler, gid_train)
-    test_winner_acc = evaluate_winner_prediction(model, scaler, gid_test)
-    print(f"Train: {train_winner_acc:.4f}")
-    print(f"Test:  {test_winner_acc:.4f}")
-
-    # Interpretability
-    if hasattr(model, "coef_"):
-        coefs = model.coef_
-        top_idx = np.argsort(np.abs(coefs))[::-1][:10]
-        print("\nTop 10 features by |coefficient|")
-        for rank, i in enumerate(top_idx, 1):
-            print(f"  {rank:2d}. {feature_names[i]:30s}  {coefs[i]:+.4f}")
+    # Per-game winner accuracy from predicted win probabilities.
+    if hasattr(model, "predict_proba"):
+        p_train = model.predict_proba(X_train_used)[:, 1]
+        p_test = model.predict_proba(X_test_used)[:, 1]
     else:
-        # XGBoost path
-        try:
+        # Fallback: treat raw predictions as scores
+        p_train = model.predict(X_train_used)
+        p_test = model.predict(X_test_used)
+
+    train_winner_acc = evaluate_winner_accuracy_from_probs(y_train, p_train, gid_train)
+    test_winner_acc = evaluate_winner_accuracy_from_probs(y_test, p_test, gid_test)
+
+    # Random baselines on the same split (tie-aware).
+    rand_sampled = sampled_random_winner_accuracy(y_test, gid_test, seed=seed)
+
+    # Save trained model.
+    if not args.load:
+        model_type = "winner_logreg" if args.model == "ridge" else "winner_xgb_classifier"
+        joblib.dump(
+            {
+                "model": model,
+                "scaler": scaler,
+                "model_type": model_type,
+                "task": "winner",
+            },
+            output_path,
+        )
+
+        print(f"\nModel saved to {output_path}")
+
+    print("\nSummary:")
+    print(
+        f"WinnerAcc:        {test_winner_acc:.4f} "
+        f"(model={args.model}, n_test_games={len(np.unique(gid_test))})"
+    )
+    print(f"RandomPickAcc:    {rand_sampled:.4f} (uniform random player per game)")
+
+    # Interpretability only on last trained model, and only when the feature-name list matches.
+    try:
+        if hasattr(model, "coef_"):
+            coefs = np.asarray(model.coef_).ravel()
+            top_idx = np.argsort(np.abs(coefs))[::-1][:20]
+            print("\nTop 20 features by |coefficient|")
+            for rank, i in enumerate(top_idx, 1):
+                if i < len(feature_names):
+                    print(f"  {rank:2d}. {feature_names[i]:30s}  {coefs[i]:+.4f}")
+        else:
             from models.xgboost_model import top_feature_importances
 
-            top_idx = top_feature_importances(model, k=10)
+            top_idx = top_feature_importances(model, k=20)
             importances = getattr(model, "feature_importances_", None)
-            if importances is None or len(top_idx) == 0:
-                return
-
-            print("\nTop 10 features by importance")
-            for rank, i in enumerate(top_idx, 1):
-                print(f"  {rank:2d}. {feature_names[i]:30s}  {importances[i]:.6f}")
-        except Exception:
-            # If xgboost isn't installed or importances unavailable, skip.
-            return
+            if importances is not None and len(top_idx) > 0:
+                print("\nTop 20 features by importance")
+                for rank, i in enumerate(top_idx, 1):
+                    if i < len(feature_names):
+                        print(f"  {rank:2d}. {feature_names[i]:30s}  {importances[i]:.6f}")
+    except Exception:
+        # If xgboost isn't installed or importances unavailable, skip.
+        pass
 
 
 if __name__ == "__main__":

@@ -17,8 +17,8 @@ This project uses [uv](https://github.com/astral-sh/uv) to manage dependencies. 
 
 This project supports two models:
 
-- `ridge` — linear regression with L2 regularization  
-- `xgb` — XGBoost regressor  
+- `ridge` — logistic regression baseline (winner classification)
+- `xgb` — XGBoost classifier (winner classification)
 
 The training pipeline is shared; select the model using the `--model` flag.
 
@@ -38,6 +38,8 @@ or explicitly:
 uv run train.py --model ridge
 ```
 
+This saves to `winner_logreg.pkl` by default.
+
 ---
 
 ## Train XGBoost
@@ -46,15 +48,7 @@ uv run train.py --model ridge
 uv run train.py --model xgb
 ```
 
----
-
-## Train XGBoost (Ranking)
-
-Trains a learning-to-rank model that groups samples by `game_id` (each board is a query group):
-
-```
-uv run train.py --model xgb --rank
-```
+This saves to `winner_xgb.pkl` by default.
 
 ---
 
