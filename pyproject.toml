@@ -9,3 +9,6 @@ dependencies = [
     "numpy>=2.4.2",
     "scikit-learn>=1.8.0",
 ]
+
+[tool.setuptools.packages.find]
+include = ["features*", "data_generation*"]
