@@ -1,3 +1,4 @@
+
 # reframe problem as winner likelihood prediction
 import argparse
 import os
@@ -17,11 +18,12 @@ from board_constants import RESOURCES
 from config import RANDOM_SEED, TEST_SPLIT, PROJECT_ROOT
 
 # define hyperparameters for testing the MLP model
-HIDDEN_DIMS = 64
-OUTPUT_DIM = 32
+
+HIDDEN_DIMS = [64, 128]
+OUTPUT_DIM = [32, 64]
 NUM_EPOCHS = 20
-BATCH_SIZE = 1024
-LEARNING_RATE = 1e-2
+BATCH_SIZE = [256, 1024]
+LEARNING_RATE = [1e-2, 1e-3, 1e-4]
 
 print(f"Pytorch Hyperparameters:")
 print(f"  Hidden Dims: {HIDDEN_DIMS}")
@@ -30,7 +32,7 @@ print(f"  Learning Rate: {LEARNING_RATE}")
 print(f"  Batch Size: {BATCH_SIZE}")
 print(f"  Number of Epochs: {NUM_EPOCHS}")
 
-def get_probabilities(model, X_s1, X_s2, X_global, batch_size = BATCH_SIZE, device="cpu"):
+def get_probabilities(model, X_s1, X_s2, X_global, batch_size, device="cpu"):
     """
     outputs the probabilities of each player of winning the game for each game in the dataset, based on the model
     """
@@ -154,7 +156,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Loading dataset...")
     X_s1, X_s2, X_global, y, game_ids = build_pytorch_dataset()
 
@@ -180,17 +182,6 @@ def main():
     sclr_s2_transformed = scaler_s2.transform(X_test_s2)
     sclr_global_transformed = scaler_global.transform(X_test_global)
 
-    """ class Model(nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.conv1 = nn.Conv2d(1, 20, 5)
-        self.conv2 = nn.Conv2d(20, 20, 5)
-
-    def forward(self, x):
-        x = F.relu(self.conv1(x))
-        return F.relu(self.conv2(x))
-        """
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     class WinnerPredictor(nn.Module):
         def __init__(self, input_dim, hidden_dim, output_dim, global_dim):
             super().__init__()
@@ -216,58 +207,66 @@ def main():
             combined_tensor = torch.cat([x_s1_encoded, x_s2_encoded, x_s2_encoded * x_s1_encoded, torch.abs(x_s1_encoded - x_s2_encoded), x_global], dim=1)
             return self.classifier(combined_tensor).squeeze(1)
 
-    model = WinnerPredictor(
-        input_dim=X_train_s1.shape[1], 
-        hidden_dim=HIDDEN_DIMS, 
-        output_dim=OUTPUT_DIM, 
-        global_dim=X_train_global.shape[1], 
-    ).to(device)
-    
-    tensor_train_data = TensorDataset(
-        torch.tensor(sclr_s1_fitted, dtype=torch.float32),
-        torch.tensor(sclr_s2_fitted, dtype=torch.float32),
-        torch.tensor(sclr_global_fitted, dtype=torch.float32),
-        torch.tensor(y_train, dtype=torch.float32),
-    )
-    tensor_test_data = TensorDataset(
-        torch.tensor(sclr_s1_transformed, dtype=torch.float32),
-        torch.tensor(sclr_s2_transformed, dtype=torch.float32),
-        torch.tensor(sclr_global_transformed, dtype=torch.float32),
-        torch.tensor(y_test, dtype=torch.float32),
-    )
-    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
-    criterion = nn.BCEWithLogitsLoss()
-    train_loader = DataLoader(tensor_train_data, batch_size=128, shuffle=True)
-    test_loader = DataLoader(tensor_test_data, batch_size = 128, shuffle = False)
-    
-    for epoch in range(NUM_EPOCHS):
-        model.train()
+    # grid search hyperparameters
 
-        for xs1, xs2, xglobal, yb in train_loader:
-            xs1 = xs1.to(device)
-            xs2 = xs2.to(device)
-            xglobal = xglobal.to(device)
-            yb = yb.to(device)
+    for hidden_dim in HIDDEN_DIMS:
+        for output_dim in OUTPUT_DIM:
+            for learning_rate in LEARNING_RATE:
+                for batch_size in BATCH_SIZE:
+                    print(f"model params: hidden_dim={hidden_dim}, output_dim={output_dim}, learning_rate={learning_rate}, batch_size={batch_size}")
 
-            optimizer.zero_grad()
-            y_pred = model(xs1, xs2, xglobal)
-            loss = criterion(y_pred, yb)
-            loss.backward()
-            optimizer.step()
+                    model = WinnerPredictor(
+                        input_dim=X_train_s1.shape[1], 
+                        hidden_dim=hidden_dim, 
+                        output_dim=output_dim, 
+                        global_dim=X_train_global.shape[1], 
+                    ).to(device)
+                    
+                    tensor_train_data = TensorDataset(
+                        torch.tensor(sclr_s1_fitted, dtype=torch.float32),
+                        torch.tensor(sclr_s2_fitted, dtype=torch.float32),
+                        torch.tensor(sclr_global_fitted, dtype=torch.float32),
+                        torch.tensor(y_train, dtype=torch.float32),
+                    )
+                    tensor_test_data = TensorDataset(
+                        torch.tensor(sclr_s1_transformed, dtype=torch.float32),
+                        torch.tensor(sclr_s2_transformed, dtype=torch.float32),
+                        torch.tensor(sclr_global_transformed, dtype=torch.float32),
+                        torch.tensor(y_test, dtype=torch.float32),
+                    )
+                    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+                    criterion = nn.BCEWithLogitsLoss()
+                    train_loader = DataLoader(tensor_train_data, batch_size=batch_size, shuffle=True)
+                    test_loader = DataLoader(tensor_test_data, batch_size = batch_size, shuffle = False)
+                    
+                    for epoch in range(NUM_EPOCHS):
+                        model.train()
 
-    p_train = get_probabilities(model, sclr_s1_fitted, sclr_s2_fitted, sclr_global_fitted, device=device)
-    p_test = get_probabilities(model, sclr_s1_transformed, sclr_s2_transformed, sclr_global_transformed, device=device)
+                        for xs1, xs2, xglobal, yb in train_loader:
+                            xs1 = xs1.to(device)
+                            xs2 = xs2.to(device)
+                            xglobal = xglobal.to(device)
+                            yb = yb.to(device)
+
+                            optimizer.zero_grad()
+                            y_pred = model(xs1, xs2, xglobal)
+                            loss = criterion(y_pred, yb)
+                            loss.backward()
+                            optimizer.step()
+
+                    p_train = get_probabilities(model, sclr_s1_fitted, sclr_s2_fitted, sclr_global_fitted, batch_size, device=device)
+                    p_test = get_probabilities(model, sclr_s1_transformed, sclr_s2_transformed, sclr_global_transformed, batch_size, device=device)
 
     # Per-game winner accuracy from predicted win probabilities.
 
-    print("\nWinner prediction (full board context):")
-    train_winner_acc = evaluate_winner_accuracy_from_probs(y_train, p_train, gid_train)
-    test_winner_acc = evaluate_winner_accuracy_from_probs(y_test, p_test, gid_test)
-    print("\nSummary:")
-    print(
-        f"WinnerAcc:        {test_winner_acc:.4f} "
-        #f"(model={args.model}, n_test_games={len(np.unique(gid_test))})"
-    )
+                    print("\nWinner prediction (full board context):")
+                    train_winner_acc = evaluate_winner_accuracy_from_probs(y_train, p_train, gid_train)
+                    test_winner_acc = evaluate_winner_accuracy_from_probs(y_test, p_test, gid_test)
+                    print("\nSummary:")
+                    print(
+                        f"WinnerAcc:        {test_winner_acc:.4f} "
+                        #f"(model={args.model}, n_test_games={len(np.unique(gid_test))})"
+                    )
 
 if __name__ == "__main__":
     main()

@@ -8,11 +8,12 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, log_loss, roc_auc_score
 from scipy.stats import spearmanr
 
-from features.generate_features import build_winner_classification_dataset_feature_testing as build_winner_classification_dataset
+from features.generate_features_deep import build_winner_classification_dataset_feature_testing as build_winner_classification_dataset
 from board_constants import RESOURCES
 from config import RANDOM_SEED, TEST_SPLIT, PROJECT_ROOT
 
 # define hyperparameters for testing the MLP model
+# tested hyperparameters manually 
 
 MLP_HIDDEN_LAYERS = (512, 256, 128)
 MLP_MAX_ITER = 3000

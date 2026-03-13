@@ -419,6 +419,103 @@ def extract_board_features(tile_info: dict) -> np.ndarray:
             num_high_value[idx] += int(num in (6, 8))
     return np.concat([resource_production, num_high_value, [desert_ring]])
 
+def extract_placement_features_pytorch(
+    settlement_node: int,
+    road_edge: tuple[int, int],
+    tile_info: dict,
+    port_map: dict,
+) -> np.ndarray:
+    """
+    Features for a single settlement + road placement.
+
+    Returns:
+        1D numpy array of features
+
+        - Number of adjacent resources: [brick_count, wood_count, sheep_count, wheat_count, ore_count]
+        - Total production value: sum of NUMBER_PROBABILITIES for adjacent tiles.
+        - Per-resource production: [brick_prod, wood_prod, ...]
+        - Has port: whether this node has any port access
+        - Port type: one-hot for specific resource port or 3:1 "ANY" port
+    """
+    adj_tiles = NODE_TO_TILE_IDS[settlement_node]
+
+    resource_counts = np.zeros(5)
+    resource_production = np.zeros(5)
+    total_production = 0.0
+
+    for tid in adj_tiles:
+        tile = tile_info[tid]
+        res = tile["resource"]
+        num = tile["number"]
+        if res is None:
+            continue
+        idx = RESOURCES.index(res)
+        prob = NUMBER_PROBABILITIES.get(num, 0)
+        resource_counts[idx] += 1
+        resource_production[idx] += prob
+        total_production += prob
+
+
+    has_port = float(settlement_node in port_map)
+    port_onehot = np.zeros(6)  # BRICK, WOOD, SHEEP, WHEAT, ORE, ANY
+    if settlement_node in port_map:
+        port_res = port_map[settlement_node]
+        if port_res is None:
+            port_onehot[5] = 1.0  # 3:1 ANY port
+        else:
+            port_onehot[RESOURCES.index(port_res)] = 1.0
+
+
+    return np.concatenate(
+        [
+            resource_counts,  # 5
+            [total_production],  # 1
+            resource_production,  # 5
+            [has_port],  # 1
+            port_onehot,  # 6
+        ]
+    )  # total: 18
+
+
+def extract_opponent_features_pytorch(
+    settlement_node: int,
+    tile_info: dict,
+    opponent_placements: list[int],
+) -> np.ndarray:
+    """
+    Features about opponents' existing placements for a given potential settlement node
+
+    Args:
+        settlement_node: the candidate node
+        tile_info: parsed board tile info
+        opponent_placements: list of node IDs already placed by opponents (empty if placing first)
+
+    Returns:
+        1D numpy array of features
+
+        - Shared tile opponents: number of opponent settlements on tiles touching the canditate node
+        - Resource competition: for each resource adjacent to this node, how many opponent settlements also touch that resource [num_brick_settlements, num_wood_settlements, ...]
+    """
+    my_tiles = set(NODE_TO_TILE_IDS[settlement_node])
+
+    resource_competition = np.zeros(5)
+    shared_tile_opponents = 0
+    for opp_node in opponent_placements:
+        opp_tiles = set(NODE_TO_TILE_IDS[opp_node])
+        if opp_tiles & my_tiles:
+            shared_tile_opponents += 1
+        for tid in opp_tiles & my_tiles:
+            res = tile_info[tid]["resource"]
+            if res is not None:
+                resource_competition[RESOURCES.index(res)] += 1
+
+    return np.concatenate(
+        [
+            [shared_tile_opponents],  # 1
+            resource_competition,  # 5
+        ]
+    )  # total: 6
+
 
 def extract_raw_board_features(tile_info: dict) -> np.ndarray:
     """
@@ -849,15 +946,16 @@ def build_winner_classification_dataset_feature_testing() -> tuple[np.ndarray, n
 
 
 def build_pytorch_dataset() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    def build_winner_classification_dataset_feature_testing() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Dataset for winner prediction.
 
-    One row per player per game (4 rows/game).
-    Features are built from BOTH of the player's placements and the full opening state.
+    Encoding features for each settlement and road placement as well as global features.
+    Also returns y, labels for the actual winner of the game.
     Labels are binary: 1 if the player is a winner (tie-aware), else 0.
 
     Returns:
-        X: (n_games * 4, n_features)
+        X_s1: (n_games * 4, n_r0_features)
+        X_s2: (n_games * 4, n_r1_features)
+        X_global: (n_games * 4, n_global_features) (features shared by all players, board/ global level)
         y: (n_games * 4,) in {0.0, 1.0}
         game_ids: (n_games * 4,)
     """
@@ -878,10 +976,12 @@ def build_pytorch_dataset() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndar
                 }
             )
 
-    all_features = []
-    all_labels = []
-    all_game_ids = []
-
+    s1_features= []
+    s2_features= []
+    global_features= []
+    all_labels= []
+    all_game_ids= []
+    
     for gid, players in game_players.items():
         if gid not in game_boards:
             continue
@@ -902,43 +1002,43 @@ def build_pytorch_dataset() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndar
 
         board_feats = extract_board_features(tile_info)
         raw_board_feats = extract_raw_board_features(tile_info)
+        global_feats = np.concatenate([board_feats, raw_board_feats])
 
         for pi in range(len(players)):
             label = float(players[pi]["vps"] == max_vp)
-
-            per_player_parts = []
-            resources_covered_by_player = set()
+            round_features = []
+            # creating features for each settlement and road placement ROUND
             for rnd in (0, 1):
                 settlement = parsed[pi][rnd]["settlement_node"]
                 road = parsed[pi][rnd]["road_edge"]
 
                 occupied = [s for s in all_settlements if s != settlement]
 
-                placement_feats, resource_coverage = extract_placement_features_winner(
+                placement_feats = extract_placement_features_pytorch(
                     settlement,
                     road,
                     tile_info,
                     port_map,
-                    board_resource_production=board_resource_production,
-                    occupied_nodes=occupied,
                 )
-                resources_covered_by_player.update(resource_coverage)
-                opp_feats = extract_opponent_features(
+                opp_feats = extract_opponent_features_pytorch(
                     settlement,
                     tile_info,
                     opponent_placements=occupied,
                 )
                 turn_feats = extract_turn_order_features(pi, rnd)
 
-                per_player_parts.extend([placement_feats, opp_feats, turn_feats])
+                round_feat = np.concatenate([placement_feats, opp_feats, turn_feats])
+                round_features.append(round_feat)
             
-            resource_num_total = np.array([len(resources_covered_by_player)], dtype = int)
-            x = np.concatenate([*per_player_parts, board_feats, raw_board_feats, resource_num_total])
-            all_features.append(x)
+            s1_features.append(round_features[0])
+            s2_features.append(round_features[1])
+            global_features.append(global_feats)
             all_labels.append(label)
             all_game_ids.append(gid)
 
-    X = np.array(all_features)
+    s1_features = np.array(s1_features)
+    s2_features = np.array(s2_features)
+    global_features = np.array(global_features)
     y = np.array(all_labels, dtype=int)
     game_ids = np.array(all_game_ids)
-    return X, y, game_ids
+    return s1_features, s2_features, global_features, y, game_ids

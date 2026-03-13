@@ -7,7 +7,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from scipy.stats import spearmanr
 
-from features.generate_features import build_dataset, build_winner_dataset
+from features.generate_features_deep import build_dataset, build_winner_dataset
 from board_constants import RESOURCES
 from config import RANDOM_SEED, TEST_SPLIT, PROJECT_ROOT
 
