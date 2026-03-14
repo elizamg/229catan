@@ -37,6 +37,15 @@ uv run mypythonfile.py
 - `logreg` — logistic regression for winner classification
 - `xgb` — XGBoost classifier for winner classification
 
+MLP and PyTorch (deep / winner prediction):
+
+- `train-mlp.py` — sklearn MLP regressor for placement-to-VP prediction; also reports winner-prediction accuracy.
+- `train-mlp-wp.py` — sklearn MLP classifier for winner classification (winner prediction).
+- `train-pytorch.py` — PyTorch neural network for winner prediction (single hyperparameter set).
+- `train-pytorch-grid.py` — PyTorch winner model with grid search over hidden dims, output dim, batch size, and learning rate.
+
+Each of these supports `--load PATH` (evaluate a saved model) and `-o PATH` / `--output PATH` (default: `mlp_model.pkl`).
+
 ## Training
 
 Placement model, default ridge:
@@ -75,11 +84,39 @@ Winner model, XGBoost:
 uv run train_winner.py --model xgb
 ```
 
+MLP placement (VP prediction):
+
+```bash
+uv run train-mlp.py
+```
+
+MLP winner prediction:
+
+```bash
+uv run train-mlp-wp.py
+```
+
+PyTorch winner prediction:
+
+```bash
+uv run train-pytorch.py
+```
+
+PyTorch winner prediction (grid search over hyperparameters):
+
+```bash
+uv run train-pytorch-grid.py
+```
+
 ## Running A Saved Model
 
 ```bash
 uv run train.py --load path/to/model.pkl
 uv run train_winner.py --load path/to/model.pkl
+uv run train-mlp.py --load path/to/mlp_model.pkl
+uv run train-mlp-wp.py --load path/to/mlp_model.pkl
+uv run train-pytorch.py --load path/to/mlp_model.pkl
+uv run train-pytorch-grid.py --load path/to/mlp_model.pkl
 ```
 
 ## Default Outputs
@@ -88,3 +125,4 @@ uv run train_winner.py --load path/to/model.pkl
 - `xgb_model.pkl`
 - `winner_logreg.pkl`
 - `winner_xgb.pkl`
+- `mlp_model.pkl` (train-mlp, train-mlp-wp, train-pytorch, train-pytorch-grid with default `-o`)
