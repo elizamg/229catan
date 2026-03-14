@@ -10,3 +10,6 @@ dependencies = [
     "scikit-learn>=1.8.0",
     "xgboost>=3.0.5",
 ]
+
+[tool.setuptools.packages.find]
+include = ["features*", "data_generation*"]
