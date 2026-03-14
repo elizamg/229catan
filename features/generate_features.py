@@ -490,11 +490,11 @@ def build_transformer_dataset():
     acc_struct_owner = []
     acc_struct_type = []
     acc_struct_pos = []
-    acc_struct_mask = []   # True = padding (ignore)
+    acc_struct_mask = []  # True = padding (ignore)
     acc_road_owner = []
     acc_road_a = []
     acc_road_b = []
-    acc_road_mask = []     # True = padding (ignore)
+    acc_road_mask = []  # True = padding (ignore)
     acc_hand_features = []
     all_vps = []
     all_game_ids = []
@@ -551,13 +551,12 @@ def build_transformer_dataset():
             for pi in order:
                 # hand-engineered features
                 if rnd == 0:
-                    opponent_settlements = [
-                        vp[1] for vp in visible_placements
-                    ]
+                    opponent_settlements = [vp[1] for vp in visible_placements]
                 else:
                     own_r0 = parsed[pi][0]["settlement_node"]
                     opponent_settlements = [
-                        vp[1] for vp in visible_placements
+                        vp[1]
+                        for vp in visible_placements
                         if not (vp[0] == pi and vp[1] == own_r0)
                     ]
 
@@ -565,8 +564,13 @@ def build_transformer_dataset():
                 road = parsed[pi][rnd]["road_edge"]
 
                 hand_feat = build_feature_vector(
-                    settlement, road, tile_info, port_map,
-                    opponent_settlements, pi, rnd,
+                    settlement,
+                    road,
+                    tile_info,
+                    port_map,
+                    opponent_settlements,
+                    pi,
+                    rnd,
                 )
 
                 # structure tokens
@@ -673,8 +677,8 @@ def build_winner_dataset() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
         all_settlements = []
         for pi in range(n):
-            all_settlements.append(parsed[pi][0]["settlement_node"]) # round 0
-            all_settlements.append(parsed[pi][1]["settlement_node"]) # round 1
+            all_settlements.append(parsed[pi][0]["settlement_node"])  # round 0
+            all_settlements.append(parsed[pi][1]["settlement_node"])  # round 1
 
         for pi in range(n):
             settlement = parsed[pi][1]["settlement_node"]
@@ -810,8 +814,13 @@ def build_transformer_winner_dataset():
             ]
 
             hand_feat = build_feature_vector(
-                settlement, road, tile_info, port_map,
-                opponent_settlements, pi, 1,
+                settlement,
+                road,
+                tile_info,
+                port_map,
+                opponent_settlements,
+                pi,
+                1,
             )
 
             struct_owner = np.zeros(MAX_STRUCTS, dtype=np.int64)
@@ -867,7 +876,231 @@ def build_transformer_winner_dataset():
         "road_mask": np.array(acc_road_mask),
         "hand_features": np.array(acc_hand_features),
     }
-    y = np.array(all_vps, dtype=np.float32)
+    y_out = np.array(all_vps, dtype=np.float32)
+    game_ids_out = np.array(all_game_ids)
+
+    return data, y_out, game_ids_out
+
+
+def _hand_feats_for_placement(
+    settlement, road, tile_info, port_map, opponent_settlements, player_index, rnd
+):
+    """Hand-engineered features for a single placement (placement + opponent + turn)."""
+    placement_feats = extract_placement_features(settlement, road, tile_info, port_map)
+    opponent_feats = extract_opponent_features(
+        settlement, tile_info, opponent_settlements
+    )
+    turn_feats = extract_turn_order_features(player_index, rnd)
+    return np.concatenate([placement_feats, opponent_feats, turn_feats])
+
+
+# Number of hand features per placement round (21 + 7 + 6)
+HAND_FEATS_PER_ROUND = 34
+
+
+def build_joint_winner_dataset():
+    """
+    Build dataset for the joint 4-player winner prediction transformer.
+
+    One sample per game. Includes all 8 placements (full visibility) for
+    training/benchmarking. The model architecture supports variable numbers
+    of placements via masking, so at inference time fewer placements can be
+    provided to evaluate candidate positions.
+
+    Token ordering for structs/roads follows the snake draft:
+        round 0: player 0, 1, 2, 3
+        round 1: player 3, 2, 1, 0
+
+    Owner IDs are absolute (0-3).
+
+    Hand features are (4, 2*F) per game: for each player, round-0 and round-1
+    features concatenated. F = HAND_FEATS_PER_ROUND = 34.
+
+    Returns:
+        data: dict of numpy arrays:
+            tile_resource:  (n_games, 19)
+            tile_dicenum:   (n_games, 19)
+            tile_pos:       (n_games, 19)
+            port_resource:  (n_games, 9)
+            port_pos:       (n_games, 9)
+            struct_owner:   (n_games, 8)   absolute player ID 0-3
+            struct_type:    (n_games, 8)   all 0 (settlements)
+            struct_pos:     (n_games, 8)   node IDs (0-53)
+            struct_mask:    (n_games, 8)   True=padding (all False here)
+            road_owner:     (n_games, 8)
+            road_a:         (n_games, 8)
+            road_b:         (n_games, 8)
+            road_mask:      (n_games, 8)   True=padding (all False here)
+            hand_features:  (n_games, 4, 2*F) per-player features
+        winner: (n_games,) int64, winner player index (0-3)
+        game_ids: (n_games,) game ID strings
+    """
+    RESOURCE_TO_ID = {"BRICK": 0, "WOOD": 1, "SHEEP": 2, "WHEAT": 3, "ORE": 4}
+    PORT_TYPE_TO_ID = {"BRICK": 0, "WOOD": 1, "SHEEP": 2, "WHEAT": 3, "ORE": 4}
+    MAX_STRUCTS = 8
+    MAX_ROADS = 8
+    F = HAND_FEATS_PER_ROUND
+
+    game_boards = {}
+    with open(GAMES_CSV, newline="") as f:
+        for row in csv.DictReader(f):
+            game_boards[row["game_id"]] = row["board_layout"]
+
+    game_players: dict[str, list[dict]] = {}
+    with open(PLAYERS_CSV, newline="") as f:
+        for row in csv.DictReader(f):
+            gid = row["game_id"]
+            game_players.setdefault(gid, []).append(
+                {
+                    "player": row["player"],
+                    "placements_json": row["initial_placements"],
+                    "vps": int(row["vps"]),
+                }
+            )
+
+    tile_pos_fixed = np.arange(19, dtype=np.int64)
+    port_pos_fixed = np.arange(9, dtype=np.int64)
+
+    acc_tile_resource = []
+    acc_tile_dicenum = []
+    acc_tile_pos = []
+    acc_port_resource = []
+    acc_port_pos = []
+    acc_struct_owner = []
+    acc_struct_type = []
+    acc_struct_pos = []
+    acc_struct_mask = []
+    acc_road_owner = []
+    acc_road_a = []
+    acc_road_b = []
+    acc_road_mask = []
+    acc_hand_features = []
+    all_winners = []
+    all_game_ids = []
+
+    for gid, players in game_players.items():
+        if gid not in game_boards:
+            continue
+        n = len(players)
+        if n != 4:
+            continue
+
+        board_layout_json = game_boards[gid]
+        tile_info, port_map = parse_board(board_layout_json)
+        board_layout = json.loads(board_layout_json)
+
+        # tile tokens
+        tile_resource = np.zeros(19, dtype=np.int64)
+        tile_dicenum = np.zeros(19, dtype=np.int64)
+        for tid in range(19):
+            tile = tile_info[tid]
+            res = tile["resource"]
+            num = tile["number"]
+            if res is None:
+                tile_resource[tid] = 5
+                tile_dicenum[tid] = 0
+            else:
+                tile_resource[tid] = RESOURCE_TO_ID[res]
+                tile_dicenum[tid] = num - 1
+
+        # port tokens
+        port_resources = []
+        for loc in board_layout:
+            if loc["tile"]["type"] == "PORT":
+                res = loc["tile"].get("resource")
+                if res is None:
+                    port_resources.append(5)
+                else:
+                    port_resources.append(PORT_TYPE_TO_ID[res])
+        port_resource = np.array(port_resources, dtype=np.int64)
+
+        parsed = [parse_placements(p["placements_json"]) for p in players]
+
+        # snake draft order: r0 = [0,1,2,3], r1 = [3,2,1,0]
+        draft_order = list(range(n)) + list(range(n - 1, -1, -1))
+
+        # collect all settlement nodes for opponent feature computation
+        all_settlements = []
+        for pi in range(n):
+            all_settlements.append(parsed[pi][0]["settlement_node"])
+            all_settlements.append(parsed[pi][1]["settlement_node"])
+
+        # structure and road tokens in draft order
+        struct_owner = np.zeros(MAX_STRUCTS, dtype=np.int64)
+        struct_type = np.zeros(MAX_STRUCTS, dtype=np.int64)
+        struct_pos = np.zeros(MAX_STRUCTS, dtype=np.int64)
+        struct_mask = np.zeros(MAX_STRUCTS, dtype=bool)  # all real
+        road_owner = np.zeros(MAX_ROADS, dtype=np.int64)
+        road_a_arr = np.zeros(MAX_ROADS, dtype=np.int64)
+        road_b_arr = np.zeros(MAX_ROADS, dtype=np.int64)
+        road_mask = np.zeros(MAX_ROADS, dtype=bool)  # all real
+
+        for idx, pi in enumerate(draft_order):
+            rnd = 0 if idx < n else 1
+            struct_owner[idx] = pi
+            struct_pos[idx] = parsed[pi][rnd]["settlement_node"]
+            road_owner[idx] = pi
+            road_a_arr[idx] = parsed[pi][rnd]["road_edge"][0]
+            road_b_arr[idx] = parsed[pi][rnd]["road_edge"][1]
+
+        # per-player hand features: both rounds concatenated, (4, 2*F)
+        hand_feats = np.zeros((4, 2 * F))
+        for pi in range(n):
+            for rnd in range(2):
+                settlement = parsed[pi][rnd]["settlement_node"]
+                road = parsed[pi][rnd]["road_edge"]
+                settle_idx = 2 * pi + rnd
+                opp = [s for k, s in enumerate(all_settlements) if k != settle_idx]
+
+                feats = _hand_feats_for_placement(
+                    settlement,
+                    road,
+                    tile_info,
+                    port_map,
+                    opp,
+                    pi,
+                    rnd,
+                )
+                hand_feats[pi, rnd * F : (rnd + 1) * F] = feats
+
+        # winner = player with max VPs
+        vps = [p["vps"] for p in players]
+        winner = int(np.argmax(vps))
+
+        acc_tile_resource.append(tile_resource)
+        acc_tile_dicenum.append(tile_dicenum)
+        acc_tile_pos.append(tile_pos_fixed)
+        acc_port_resource.append(port_resource)
+        acc_port_pos.append(port_pos_fixed)
+        acc_struct_owner.append(struct_owner)
+        acc_struct_type.append(struct_type)
+        acc_struct_pos.append(struct_pos)
+        acc_struct_mask.append(struct_mask)
+        acc_road_owner.append(road_owner)
+        acc_road_a.append(road_a_arr)
+        acc_road_b.append(road_b_arr)
+        acc_road_mask.append(road_mask)
+        acc_hand_features.append(hand_feats)
+        all_winners.append(winner)
+        all_game_ids.append(gid)
+
+    data = {
+        "tile_resource": np.array(acc_tile_resource),
+        "tile_dicenum": np.array(acc_tile_dicenum),
+        "tile_pos": np.array(acc_tile_pos),
+        "port_resource": np.array(acc_port_resource),
+        "port_pos": np.array(acc_port_pos),
+        "struct_owner": np.array(acc_struct_owner),
+        "struct_type": np.array(acc_struct_type),
+        "struct_pos": np.array(acc_struct_pos),
+        "struct_mask": np.array(acc_struct_mask),
+        "road_owner": np.array(acc_road_owner),
+        "road_a": np.array(acc_road_a),
+        "road_b": np.array(acc_road_b),
+        "road_mask": np.array(acc_road_mask),
+        "hand_features": np.array(acc_hand_features),  # (n_games, 4, 2*F)
+    }
+    winner = np.array(all_winners, dtype=np.int64)
     game_ids = np.array(all_game_ids)
 
-    return data, y, game_ids
+    return data, winner, game_ids

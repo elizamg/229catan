@@ -12,3 +12,5 @@ __pycache__
 
 
 ridge_model.pkl
+*.pt
+*.pth
