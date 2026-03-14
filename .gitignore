@@ -9,6 +9,9 @@ data_generation/*.csv
 __pycache__
 .venv/
 .python-version
+*.egg-info/
 
 
-ridge_model.pkl
+*.pkl
+*.pt
+*.pth

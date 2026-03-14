@@ -11,6 +11,7 @@ from features.generate_features import build_dataset, build_winner_dataset
 from board_constants import RESOURCES
 from config import RIDGE_ALPHA, RANDOM_SEED, TEST_SPLIT, PROJECT_ROOT
 
+
 def split_by_game(X, y, game_ids, test_frac=TEST_SPLIT, seed=RANDOM_SEED):
     """
     Note that all samples from the same game stay together.
@@ -162,6 +163,7 @@ def main():
             args.output = DEFAULT_RIDGE_MODEL_PATH
         else:
             args.output = DEFAULT_XGB_MODEL_PATH
+
 
     res_lower = [r.lower() for r in RESOURCES]
     feature_names = (
