@@ -2,14 +2,14 @@ import argparse
 import os
 import joblib
 import numpy as np
-from sklearn.linear_model import Ridge
+from sklearn.neural_network import MLPRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from scipy.stats import spearmanr
 
-from features.generate_features import build_dataset, build_winner_dataset
+from features.generate_features_deep import build_dataset, build_winner_dataset
 from board_constants import RESOURCES
-from config import RIDGE_ALPHA, RANDOM_SEED, TEST_SPLIT, PROJECT_ROOT
+from config import RANDOM_SEED, TEST_SPLIT, PROJECT_ROOT
 
 
 def split_by_game(X, y, game_ids, test_frac=TEST_SPLIT, seed=RANDOM_SEED):
@@ -119,13 +119,12 @@ def evaluate_winner_prediction(model, scaler, split_game_ids):
     return correct / len(unique_games) if len(unique_games) > 0 else 0.0
 
 
-DEFAULT_RIDGE_MODEL_PATH = os.path.join(PROJECT_ROOT, "ridge_model.pkl")
-DEFAULT_XGB_MODEL_PATH = os.path.join(PROJECT_ROOT, "xgb_model.pkl")
+DEFAULT_MODEL_PATH = os.path.join(PROJECT_ROOT, "mlp_model.pkl")
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Train / evaluate placement->VP models"
+        description="Train / evaluate MLP model"
     )
     parser.add_argument(
         "--load",
@@ -138,32 +137,15 @@ def parse_args():
         "-o",
         "--output",
         type=str,
-        default=None,
+        default=DEFAULT_MODEL_PATH,
         metavar="PATH",
-        help=(
-            "trained model save path (default: auto based on --model; "
-            f"ridge={DEFAULT_RIDGE_MODEL_PATH}, xgb={DEFAULT_XGB_MODEL_PATH})"
-        ),
-    )
-    parser.add_argument(
-        "--model",
-        type=str,
-        default="ridge",
-        choices=["ridge", "xgb"],
-        help="which model to train/evaluate (default: ridge)",
+        help=f"trained model save path (default: {DEFAULT_MODEL_PATH})",
     )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-
-    if args.output is None:
-        if args.model == "ridge":
-            args.output = DEFAULT_RIDGE_MODEL_PATH
-        else:
-            args.output = DEFAULT_XGB_MODEL_PATH
-
 
     res_lower = [r.lower() for r in RESOURCES]
     feature_names = (
@@ -194,6 +176,11 @@ def main():
         + ["placement_round", "placement_order"]
     )
 
+    print("\nFEATURE LIST\n")
+    for i, name in enumerate(feature_names):
+        print(f"{i:3d}: {name}")
+    print("\n")
+
     print("Loading dataset...")
     X, y, game_ids = build_dataset()
     print(f"Loaded {len(np.unique(game_ids))} games")
@@ -205,49 +192,27 @@ def main():
     )
     print(f"Train: {X_train.shape[0]}  Test: {X_test.shape[0]}")
 
-    # Model selection
     if args.load:
         print(f"\nLoading model from {args.load}")
         saved = joblib.load(args.load)
         model = saved["model"]
-        scaler = saved.get("scaler")
-
-        if scaler is None:
-            from models.xgboost_model import IdentityTransformer
-
-            scaler = IdentityTransformer()
-
-        X_train_used = scaler.transform(X_train)
-        X_test_used = scaler.transform(X_test)
-
+        scaler = saved["scaler"]
+        X_train_scaled = scaler.transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
     else:
-        if args.model == "ridge":
-            scaler = StandardScaler()
-            X_train_used = scaler.fit_transform(X_train)
-            X_test_used = scaler.transform(X_test)
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
 
-            model = Ridge(alpha=RIDGE_ALPHA)
-            model.fit(X_train_used, y_train)
+        model = MLPRegressor(hidden_layer_sizes=(256, 128), max_iter=3000, random_state=RANDOM_SEED, early_stopping=True, alpha=1e-2)
+        model.fit(X_train_scaled, y_train)
 
-            joblib.dump({"model": model, "scaler": scaler, "model_type": "ridge"}, args.output)
-
-        else:  # xgb
-            from models.xgboost_model import XGBConfig, train as train_xgb, save as save_xgb
-
-            cfg = XGBConfig(random_state=RANDOM_SEED)
-            model, scaler = train_xgb(X_train, y_train, cfg)
-
-            X_train_used = X_train
-            X_test_used = X_test
-
-            save_xgb(args.output, model=model, scaler=scaler, cfg=cfg)
-
+        joblib.dump({"model": model, "scaler": scaler}, args.output)
         print("\nTraining completed")
         print(f"Model saved to {args.output}")
 
-    # Evaluation
-    train_metrics = evaluate(model, X_train_used, y_train, gid_train)
-    test_metrics = evaluate(model, X_test_used, y_test, gid_test)
+    train_metrics = evaluate(model, X_train_scaled, y_train, gid_train)
+    test_metrics = evaluate(model, X_test_scaled, y_test, gid_test)
 
     print("\nTrain:")
     for k, v in train_metrics.items():
@@ -262,29 +227,13 @@ def main():
     print(f"Train: {train_winner_acc:.4f}")
     print(f"Test:  {test_winner_acc:.4f}")
 
-    # Interpretability
-    if hasattr(model, "coef_"):
-        coefs = model.coef_
-        top_idx = np.argsort(np.abs(coefs))[::-1][:10]
-        print("\nTop 10 features by |coefficient|")
-        for rank, i in enumerate(top_idx, 1):
-            print(f"  {rank:2d}. {feature_names[i]:30s}  {coefs[i]:+.4f}")
-    else:
-        # XGBoost path
-        try:
-            from models.xgboost_model import top_feature_importances
-
-            top_idx = top_feature_importances(model, k=10)
-            importances = getattr(model, "feature_importances_", None)
-            if importances is None or len(top_idx) == 0:
-                return
-
-            print("\nTop 10 features by importance")
-            for rank, i in enumerate(top_idx, 1):
-                print(f"  {rank:2d}. {feature_names[i]:30s}  {importances[i]:.6f}")
-        except Exception:
-            # If xgboost isn't installed or importances unavailable, skip.
-            return
+    # feature importance - based on the first layer weights
+    coefs = model.coefs_[0]
+    feature_importance = np.abs(coefs).sum(axis=1)
+    top_idx = np.argsort(feature_importance)[::-1][:10]
+    print("\nTop 10 features by feature importance")
+    for rank, i in enumerate(top_idx, 1):
+        print(f"  {rank:2d}. {feature_names[i]:30s}  {feature_importance[i]:+.4f}")
 
 
 if __name__ == "__main__":
