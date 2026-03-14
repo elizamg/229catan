@@ -10,7 +10,7 @@ import matplotlib.patches as mpatches
 
 from transformer_winner_crossattn_concat import CatanWinnerCrossAttnConcat
 from transformer_winner_raw_crossattn import CatanWinnerRawCrossAttn
-from features.generate_features import build_joint_winner_dataset, HAND_FEATS_PER_ROUND
+from features.generate_features_transformer import build_joint_winner_dataset, HAND_FEATS_PER_ROUND
 from config import RANDOM_SEED, TEST_SPLIT, PROJECT_ROOT
 
 RESOURCE_NAMES = ["BRICK", "WOOD", "SHEEP", "WHEAT", "ORE", "DESERT"]

@@ -9,7 +9,7 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
 from transformer_winner_raw import CatanWinnerTransformerRaw
-from features.generate_features import build_joint_winner_dataset
+from features.generate_features_transformer import build_joint_winner_dataset
 from config import RANDOM_SEED, TEST_SPLIT, PROJECT_ROOT
 
 DEVICE = torch.device(

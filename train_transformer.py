@@ -14,7 +14,7 @@ from scipy.stats import spearmanr
 
 from transformer import CatanTransformer
 
-from features.generate_features import build_transformer_dataset, build_transformer_winner_dataset
+from features.generate_features_transformer import build_transformer_dataset, build_transformer_winner_dataset
 from config import RANDOM_SEED, TEST_SPLIT, PROJECT_ROOT
 
 DEVICE = torch.device(
